@@ -248,6 +248,20 @@ const AeginaElevation = () => {
     }
     
     geometry = new THREE.PlaneGeometry(planeWidth, planeHeight, cols - 1, rows - 1);
+    
+    // Ensure UVs are properly set for texture mapping
+    // PlaneGeometry default UVs go from 0-1, which maps correctly to our texture space
+    // UV (0,0) = bottom-left, UV (1,1) = top-right
+    const uvAttribute = geometry.getAttribute('uv');
+    for (let i = 0; i < uvAttribute.count; i++) {
+      // UVs are already set correctly by PlaneGeometry, just ensure they're in 0-1 range
+      const u = uvAttribute.getX(i);
+      const v = uvAttribute.getY(i);
+      // Clamp to ensure proper texture mapping
+      uvAttribute.setXY(i, Math.max(0, Math.min(1, u)), Math.max(0, Math.min(1, v)));
+    }
+    uvAttribute.needsUpdate = true;
+    
     applyElevationAndColors(geometry, planeWidth, planeHeight);
     
     material = new THREE.MeshPhongMaterial({ 
