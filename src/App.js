@@ -15,6 +15,7 @@ import {
 const AeginaElevation = () => {
   const threeRef = useRef(null);
   const cameraStateRef = useRef({ position: null, target: null });
+  const texturesCacheRef = useRef({}); // Cache for pre-generated textures
   const [terrainDetail, setTerrainDetail] = useState('Low');
   const [appearance, setAppearance] = useState('Island');
   const [isLoading, setIsLoading] = useState(true);
@@ -472,13 +473,23 @@ const AeginaElevation = () => {
                          appearance.toLowerCase() === 'satellite' ? 'satellite' : 'watercolor';
         // Get zoom level based on terrain detail for consistent map detail
         const zoom = getZoomForTerrainDetail(terrainDetail);
+        const cacheKey = `${mapSource}_${zoom}`;
+        
         try {
-          // Use Aegina map bounds (from elevation data) for accurate tile positioning and reduced coverage area
-          const mapBounds = getMapBounds('AEGINA');
-          const mapTexture = await createMapTexture(mapSource, mapBounds, zoom);
-          material.map = mapTexture;
-          material.vertexColors = false;
-          material.needsUpdate = true;
+          // Check if texture is already cached
+          if (texturesCacheRef.current[cacheKey]) {
+            material.map = texturesCacheRef.current[cacheKey];
+            material.vertexColors = false;
+            material.needsUpdate = true;
+          } else {
+            // Generate and cache the texture
+            const mapBounds = getMapBounds('AEGINA');
+            const mapTexture = await createMapTexture(mapSource, mapBounds, zoom);
+            texturesCacheRef.current[cacheKey] = mapTexture;
+            material.map = mapTexture;
+            material.vertexColors = false;
+            material.needsUpdate = true;
+          }
         } catch (error) {
           console.error('Failed to load map texture:', error);
         }
@@ -554,6 +565,28 @@ const AeginaElevation = () => {
     const loadingTimer = setTimeout(() => {
       setIsLoading(false);
     }, 100);
+    
+    // Pre-generate all map textures on first load (only once)
+    if (Object.keys(texturesCacheRef.current).length === 0) {
+      (async () => {
+        const mapSources = ['osm', 'satellite', 'watercolor'];
+        const zooms = [11, 12, 13];
+        const mapBounds = getMapBounds('AEGINA');
+        
+        for (const source of mapSources) {
+          for (const zoom of zooms) {
+            const cacheKey = `${source}_${zoom}`;
+            try {
+              const mapTexture = await createMapTexture(source, mapBounds, zoom);
+              texturesCacheRef.current[cacheKey] = mapTexture;
+            } catch (error) {
+              console.error(`Failed to pre-generate ${source} zoom ${zoom}:`, error);
+            }
+          }
+        }
+        console.log('All map textures pre-generated');
+      })();
+    }
 
     return () => {
       isRunning = false;
