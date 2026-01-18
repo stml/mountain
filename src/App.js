@@ -6,13 +6,17 @@ import moniData from './moni.json';
 import elevationDataLo from './aegina_elevation_lo.json';
 import elevationDataMed from './aegina_elevation_med.json';
 import elevationDataHi from './aegina_elevation_hi.json';
-
-// === CONFIGURATION ===
-const INITIAL_ELEVATION_SCALE = 800; // Base elevation scale
+import {
+  COMBINED_BOUNDS,
+  PLANE_DIMENSIONS,
+  ELEVATION,
+  getZoomForTerrainDetail
+} from './config/geography';
 
 const AeginaElevation = () => {
   const threeRef = useRef(null);
   const [terrainDetail, setTerrainDetail] = useState('Low');
+  const [appearance, setAppearance] = useState('Island');
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -33,6 +37,74 @@ const AeginaElevation = () => {
       elevationData = elevationDataHi;
       detailLevel = 'High';
     }
+
+    // === HELPER FUNCTIONS FOR MAP TILES ===
+    
+    // Fetch a single map tile
+    const fetchTile = async (x, y, z, tileSource) => {
+      const urls = {
+        osm: `https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
+        satellite: `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
+        watercolor: `https://tile.stamen.com/watercolor/${z}/${x}/${y}.jpg`
+      };
+      
+      try {
+        const response = await fetch(urls[tileSource]);
+        if (!response.ok) throw new Error(`Tile fetch failed: ${response.status}`);
+        const blob = await response.blob();
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => resolve(null);
+            img.src = e.target.result;
+          };
+          reader.readAsDataURL(blob);
+        });
+      } catch (error) {
+        console.error(`Failed to fetch tile ${z}/${x}/${y}:`, error);
+        return null;
+      }
+    };
+    
+    // Create a texture from map tiles
+    const createMapTexture = async (tileSource, bounds, zoom) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#e0e0e0';
+      ctx.fillRect(0, 0, 512, 512);
+      
+      // Convert geographic bounds to tile coordinates
+      const getTileCoords = (lon, lat, z) => {
+        const n = Math.pow(2, z);
+        const x = Math.floor(((lon + 180) / 360) * n);
+        const y = Math.floor(((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) * n);
+        return { x, y };
+      };
+      
+      const topLeft = getTileCoords(bounds.lon_min, bounds.lat_max, zoom);
+      const bottomRight = getTileCoords(bounds.lon_max, bounds.lat_min, zoom);
+      
+      // Fetch and composite tiles
+      const tilesPerSide = Math.ceil(Math.max(bottomRight.x - topLeft.x, bottomRight.y - topLeft.y) + 1);
+      const tileSize = Math.floor(512 / tilesPerSide);
+      
+      for (let ty = topLeft.y; ty <= bottomRight.y; ty++) {
+        for (let tx = topLeft.x; tx <= bottomRight.x; tx++) {
+          const tile = await fetchTile(tx, ty, zoom, tileSource);
+          if (tile) {
+            const x = (tx - topLeft.x) * tileSize;
+            const y = (ty - topLeft.y) * tileSize;
+            ctx.drawImage(tile, x, y, tileSize, tileSize);
+          }
+        }
+      }
+      
+      return new THREE.CanvasTexture(canvas);
+    };
 
     const container = threeRef.current;
     const width = container.clientWidth;
@@ -88,10 +160,11 @@ const AeginaElevation = () => {
     const elevations = elevationData.elevations;
     const rows = elevationData.resolution.rows;
     const cols = elevationData.resolution.cols;
-    const minLon = elevationData.bounds.lon_min;
-    const maxLon = elevationData.bounds.lon_max;
-    const minLat = elevationData.bounds.lat_min;
-    const maxLat = elevationData.bounds.lat_max;
+    // Use accurate combined bounds from geography config
+    const minLon = COMBINED_BOUNDS.lon_min;
+    const maxLon = COMBINED_BOUNDS.lon_max;
+    const minLat = COMBINED_BOUNDS.lat_min;
+    const maxLat = COMBINED_BOUNDS.lat_max;
     
     // Helper function to apply elevation and colors to geometry
     const applyElevationAndColors = (geometry, planeWidth, planeHeight) => {
@@ -132,7 +205,7 @@ const AeginaElevation = () => {
           maxElev = Math.max(maxElev, elevation);
         }
         
-        const z = elevation / INITIAL_ELEVATION_SCALE;
+        const z = elevation / ELEVATION.scale;
         positions.setZ(i, z);
       }
       
@@ -161,8 +234,9 @@ const AeginaElevation = () => {
       geometry.computeVertexNormals();
     };
     
-    const planeWidth = 8;
-    const planeHeight = 5.5;
+    // Use plane dimensions from geography config for accurate aspect ratio
+    const planeWidth = PLANE_DIMENSIONS.width;
+    const planeHeight = PLANE_DIMENSIONS.height;
     
     if (existingCanvas) {
       renderer = new THREE.WebGLRenderer({ canvas: existingCanvas, antialias: true });
@@ -183,6 +257,26 @@ const AeginaElevation = () => {
       transparent: true,
       alphaTest: 0.5
     });
+    
+    // Add map texture if not Island appearance
+    if (appearance !== 'Island') {
+      const mapPromise = (async () => {
+        const mapSource = appearance.toLowerCase() === 'roads' ? 'osm' : 
+                         appearance.toLowerCase() === 'satellite' ? 'satellite' : 'watercolor';
+        // Get zoom level based on terrain detail for consistent map detail
+        const zoom = getZoomForTerrainDetail(terrainDetail);
+        try {
+          // Use accurate combined bounds from geography config
+          const mapTexture = await createMapTexture(mapSource, COMBINED_BOUNDS, zoom);
+          material.map = mapTexture;
+          material.vertexColors = false;
+          material.needsUpdate = true;
+        } catch (error) {
+          console.error('Failed to load map texture:', error);
+        }
+      })();
+    }
+    
     terrain = new THREE.Mesh(geometry, material);
     terrain.rotation.x = -Math.PI / 2;
     scene.add(terrain);
@@ -236,7 +330,7 @@ const AeginaElevation = () => {
       material.dispose();
       controls.dispose();
     };
-  }, [terrainDetail]);
+  }, [terrainDetail, appearance]);
 
   return (
     <>
@@ -288,6 +382,35 @@ const AeginaElevation = () => {
         zIndex: 1000,
         minWidth: '250px'
       }}>
+        <div style={{ marginBottom: '20px' }}>
+          <label style={{
+            display: 'block',
+            marginBottom: '8px',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            color: '#333'
+          }}>
+            Appearance
+          </label>
+          <select
+            value={appearance}
+            onChange={(e) => setAppearance(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '8px',
+              borderRadius: '4px',
+              border: '1px solid #ddd',
+              fontSize: '14px',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="Island">Island</option>
+            <option value="Roads">Roads</option>
+            <option value="Satellite">Satellite</option>
+            <option value="Watercolour">Watercolour</option>
+          </select>
+        </div>
+        
         <div>
           <label style={{
             display: 'block',
