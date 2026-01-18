@@ -8,16 +8,31 @@
 export const ISLANDS = {
   AEGINA: {
     name: 'Aegina',
+    // Bounds match the elevation data exactly - this is the source of truth
     bounds: {
-      lon_min: 23.4230677,
-      lon_max: 23.5408850,
-      lat_min: 37.6431170,
-      lat_max: 37.7743915
+      lon_min: 23.4174315,
+      lon_max: 23.5652998,
+      lat_min: 37.6735755,
+      lat_max: 37.775114
+    },
+    // Map bounds should match elevation bounds for pixel-perfect alignment
+    mapBounds: {
+      lon_min: 23.4174315,
+      lon_max: 23.5652998,
+      lat_min: 37.6735755,
+      lat_max: 37.775114
     }
   },
   MONI: {
     name: 'Moni',
     bounds: {
+      lon_min: 23.4230677,
+      lon_max: 23.4288928,
+      lat_min: 37.6861170,
+      lat_max: 37.7010720
+    },
+    // Map bounds should match elevation bounds
+    mapBounds: {
       lon_min: 23.4230677,
       lon_max: 23.4288928,
       lat_min: 37.6861170,
@@ -52,11 +67,12 @@ export const ELEVATION = {
 };
 
 // Zoom level configurations for map tiles
-// Higher zoom = more detail, larger tile coverage
+// Higher zoom = smaller geographic area per tile = more detail and focus
+// These are tuned for Aegina's mapBounds to avoid overly large surrounding area
 export const ZOOM_LEVELS = {
-  LOW: 10,      // Low terrain detail
-  MEDIUM: 11,   // Medium terrain detail
-  HIGH: 12      // High terrain detail (default)
+  LOW: 12,      // Low terrain detail - wider view
+  MEDIUM: 13,   // Medium terrain detail
+  HIGH: 14      // High terrain detail - maximum zoom for most detail
 };
 
 /**
@@ -75,6 +91,21 @@ export function getZoomForTerrainDetail(terrainDetail) {
     default:
       return ZOOM_LEVELS.HIGH;
   }
+}
+
+/**
+ * Get the map bounds for a specific island
+ * @param {string} islandName - 'AEGINA', 'MONI', or undefined for combined
+ * @returns {object} - Bounds object for map tile fetching
+ */
+export function getMapBounds(islandName = 'AEGINA') {
+  if (islandName === 'AEGINA' && ISLANDS.AEGINA.mapBounds) {
+    return ISLANDS.AEGINA.mapBounds;
+  }
+  if (islandName === 'MONI' && ISLANDS.MONI.mapBounds) {
+    return ISLANDS.MONI.mapBounds;
+  }
+  return COMBINED_BOUNDS;
 }
 
 /**
@@ -190,6 +221,7 @@ export default {
   ELEVATION,
   ZOOM_LEVELS,
   getZoomForTerrainDetail,
+  getMapBounds,
   geographicToNormalized,
   normalizedToGeographic,
   planeToGeographic,

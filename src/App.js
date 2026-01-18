@@ -7,9 +7,9 @@ import elevationDataLo from './aegina_elevation_lo.json';
 import elevationDataMed from './aegina_elevation_med.json';
 import elevationDataHi from './aegina_elevation_hi.json';
 import {
-  COMBINED_BOUNDS,
   ELEVATION,
-  getZoomForTerrainDetail
+  getZoomForTerrainDetail,
+  getMapBounds
 } from './config/geography';
 
 const AeginaElevation = () => {
@@ -69,40 +69,67 @@ const AeginaElevation = () => {
     
     // Create a texture from map tiles
     const createMapTexture = async (tileSource, bounds, zoom) => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 512;
-      canvas.height = 512;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#e0e0e0';
-      ctx.fillRect(0, 0, 512, 512);
-      
-      // Convert geographic bounds to tile coordinates
+      // Convert geographic bounds to tile coordinates using Web Mercator projection
       const getTileCoords = (lon, lat, z) => {
         const n = Math.pow(2, z);
         const x = Math.floor(((lon + 180) / 360) * n);
-        const y = Math.floor(((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) * n);
+        const latRad = (lat * Math.PI) / 180;
+        const y = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n);
         return { x, y };
       };
       
       const topLeft = getTileCoords(bounds.lon_min, bounds.lat_max, zoom);
       const bottomRight = getTileCoords(bounds.lon_max, bounds.lat_min, zoom);
       
-      // Fetch and composite tiles
-      const tilesPerSide = Math.ceil(Math.max(bottomRight.x - topLeft.x, bottomRight.y - topLeft.y) + 1);
-      const tileSize = Math.floor(512 / tilesPerSide);
+      // Calculate tile grid
+      const tileCountX = bottomRight.x - topLeft.x + 1;
+      const tileCountY = bottomRight.y - topLeft.y + 1;
       
+      // Create canvas matching tile grid exactly - each tile is 256px
+      // This ensures 1:1 pixel-to-tile mapping which maintains geographic accuracy
+      let canvasWidth = tileCountX * 256;
+      let canvasHeight = tileCountY * 256;
+      
+      // Limit canvas size but preserve aspect ratio for accurate map projection
+      const maxSize = 1024;
+      if (Math.max(canvasWidth, canvasHeight) > maxSize) {
+        const scale = maxSize / Math.max(canvasWidth, canvasHeight);
+        canvasWidth = Math.round(canvasWidth * scale);
+        canvasHeight = Math.round(canvasHeight * scale);
+      }
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#e0e0e0';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Calculate tile size preserving square tiles in both X and Y
+      const tileSizeX = canvas.width / tileCountX;
+      const tileSizeY = canvas.height / tileCountY;
+      // Use minimum to prevent tiles from distorting - should be equal anyway
+      const tileSize = Math.min(tileSizeX, tileSizeY);
+      
+      // Fetch and composite tiles
       for (let ty = topLeft.y; ty <= bottomRight.y; ty++) {
         for (let tx = topLeft.x; tx <= bottomRight.x; tx++) {
           const tile = await fetchTile(tx, ty, zoom, tileSource);
           if (tile) {
-            const x = (tx - topLeft.x) * tileSize;
-            const y = (ty - topLeft.y) * tileSize;
-            ctx.drawImage(tile, x, y, tileSize, tileSize);
+            const canvasX = (tx - topLeft.x) * tileSize;
+            const canvasY = (ty - topLeft.y) * tileSize;
+            ctx.drawImage(tile, canvasX, canvasY, tileSize, tileSize);
           }
         }
       }
       
-      return new THREE.CanvasTexture(canvas);
+      const mapTexture = new THREE.CanvasTexture(canvas);
+      mapTexture.wrapS = THREE.ClampToEdgeWrapping;
+      mapTexture.wrapT = THREE.ClampToEdgeWrapping;
+      mapTexture.minFilter = THREE.LinearFilter;
+      mapTexture.magFilter = THREE.LinearFilter;
+      
+      return mapTexture;
     };
 
     const container = threeRef.current;
@@ -279,8 +306,9 @@ const AeginaElevation = () => {
         // Get zoom level based on terrain detail for consistent map detail
         const zoom = getZoomForTerrainDetail(terrainDetail);
         try {
-          // Use accurate combined bounds from geography config
-          const mapTexture = await createMapTexture(mapSource, COMBINED_BOUNDS, zoom);
+          // Use Aegina map bounds (from elevation data) for accurate tile positioning and reduced coverage area
+          const mapBounds = getMapBounds('AEGINA');
+          const mapTexture = await createMapTexture(mapSource, mapBounds, zoom);
           material.map = mapTexture;
           material.vertexColors = false;
           material.needsUpdate = true;
