@@ -128,8 +128,10 @@ const AeginaElevation = () => {
       // Crop to the actual geographic extent
       const cropX = topLeftPixels.pixelX;
       const cropY = topLeftPixels.pixelY;
-      const cropWidth = bottomRightPixels.pixelX + 256 - cropX;
-      const cropHeight = bottomRightPixels.pixelY + 256 - cropY;
+      // Width spans from topLeftPixels in tile topLeft to bottomRightPixels in tile bottomRight
+      const cropWidth = (bottomRight.x - topLeft.x) * 256 + bottomRightPixels.pixelX - topLeftPixels.pixelX + 1;
+      // Height spans from topLeftPixels in tile topLeft to bottomRightPixels in tile bottomRight
+      const cropHeight = (bottomRight.y - topLeft.y) * 256 + bottomRightPixels.pixelY - topLeftPixels.pixelY + 1;
       
       const croppedCanvas = document.createElement('canvas');
       croppedCanvas.width = cropWidth;
