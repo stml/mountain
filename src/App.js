@@ -8,7 +8,6 @@ import elevationDataMed from './aegina_elevation_med.json';
 import elevationDataHi from './aegina_elevation_hi.json';
 import {
   COMBINED_BOUNDS,
-  PLANE_DIMENSIONS,
   ELEVATION,
   getZoomForTerrainDetail
 } from './config/geography';
@@ -160,11 +159,11 @@ const AeginaElevation = () => {
     const elevations = elevationData.elevations;
     const rows = elevationData.resolution.rows;
     const cols = elevationData.resolution.cols;
-    // Use accurate combined bounds from geography config
-    const minLon = COMBINED_BOUNDS.lon_min;
-    const maxLon = COMBINED_BOUNDS.lon_max;
-    const minLat = COMBINED_BOUNDS.lat_min;
-    const maxLat = COMBINED_BOUNDS.lat_max;
+    // Use elevation data's own bounds for terrain mapping (don't use COMBINED_BOUNDS)
+    const minLon = elevationData.bounds.lon_min;
+    const maxLon = elevationData.bounds.lon_max;
+    const minLat = elevationData.bounds.lat_min;
+    const maxLat = elevationData.bounds.lat_max;
     
     // Helper function to apply elevation and colors to geometry
     const applyElevationAndColors = (geometry, planeWidth, planeHeight) => {
@@ -234,9 +233,9 @@ const AeginaElevation = () => {
       geometry.computeVertexNormals();
     };
     
-    // Use plane dimensions from geography config for accurate aspect ratio
-    const planeWidth = PLANE_DIMENSIONS.width;
-    const planeHeight = PLANE_DIMENSIONS.height;
+    // Use original plane dimensions (geography config dimensions are for combined bounds, not elevation data)
+    const planeWidth = 8;
+    const planeHeight = 5.5;
     
     if (existingCanvas) {
       renderer = new THREE.WebGLRenderer({ canvas: existingCanvas, antialias: true });
