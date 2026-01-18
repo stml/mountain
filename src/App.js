@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import aeginaData from './aegina.json';
 import moniData from './moni.json';
-import elevationData from './aegina_elevation_hi.json';
+import elevationData from './aegina_elevation_lo.json';
 
 // === CONFIGURATION ===
 const ELEVATION_SCALE = 800; // Higher = flatter terrain, lower = more exaggerated
@@ -18,7 +19,7 @@ const AeginaElevation = () => {
     const height = container.clientHeight;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xffffff);
+    scene.background = new THREE.Color(0x87CEEB); // Light sky blue
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
     camera.position.set(0, 5, 10);
@@ -173,6 +174,14 @@ const AeginaElevation = () => {
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
 
+    // Set up OrbitControls for camera manipulation
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.enableZoom = true;
+    controls.autoRotate = false;
+    controls.autoRotateSpeed = 0;
+
     // Handle window resize
     const handleResize = () => {
       const newWidth = container.clientWidth;
@@ -188,7 +197,8 @@ const AeginaElevation = () => {
     const animate = () => {
       if (!isRunning) return;
       requestAnimationFrame(animate);
-      terrain.rotation.z += 0.005;
+      // Removed auto-rotation - now controlled by OrbitControls
+      controls.update();
       renderer.render(scene, camera);
     };
     animate();
@@ -198,6 +208,7 @@ const AeginaElevation = () => {
       window.removeEventListener('resize', handleResize);
       geometry.dispose();
       material.dispose();
+      controls.dispose();
     };
   }, []);
 
@@ -207,7 +218,10 @@ const AeginaElevation = () => {
       style={{ 
         width: '100vw', 
         height: '100vh',
-        backgroundColor: '#ffffff'
+        backgroundColor: '#87CEEB', // Light sky blue
+        margin: 0,
+        padding: 0,
+        overflow: 'hidden'
       }}
     />
   );
