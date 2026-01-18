@@ -466,34 +466,49 @@ const AeginaElevation = () => {
       alphaTest: 0.5
     });
     
-    // Add map texture if not Island appearance
+    // Add map texture if not Island appearance - load from pre-generated files
     if (appearance !== 'Island') {
-      const mapPromise = (async () => {
-        const mapSource = appearance.toLowerCase() === 'roads' ? 'osm' : 
-                         appearance.toLowerCase() === 'satellite' ? 'satellite' : 'watercolor';
-        // Get zoom level based on terrain detail for consistent map detail
-        const zoom = getZoomForTerrainDetail(terrainDetail);
-        const cacheKey = `${mapSource}_${zoom}`;
-        
-        try {
-          // Check if texture is already cached
-          if (texturesCacheRef.current[cacheKey]) {
-            material.map = texturesCacheRef.current[cacheKey];
-            material.vertexColors = false;
-            material.needsUpdate = true;
-          } else {
-            // Generate and cache the texture
-            const mapBounds = getMapBounds('AEGINA');
-            const mapTexture = await createMapTexture(mapSource, mapBounds, zoom);
-            texturesCacheRef.current[cacheKey] = mapTexture;
-            material.map = mapTexture;
-            material.vertexColors = false;
-            material.needsUpdate = true;
-          }
-        } catch (error) {
-          console.error('Failed to load map texture:', error);
+      const mapSource = appearance.toLowerCase() === 'roads' ? 'osm' : 
+                       appearance.toLowerCase() === 'satellite' ? 'satellite' : 'watercolor';
+      const zoom = getZoomForTerrainDetail(terrainDetail);
+      const cacheKey = `${mapSource}_${zoom}`;
+      
+      // Try to load pre-generated texture from public folder
+      const texturePath = `/map-textures/${mapSource}_z${zoom}.png`;
+      
+      const textureLoader = new THREE.TextureLoader();
+      textureLoader.load(
+        texturePath,
+        (texture) => {
+          // Pre-generated texture loaded successfully
+          texture.wrapS = THREE.ClampToEdgeWrapping;
+          texture.wrapT = THREE.ClampToEdgeWrapping;
+          texture.minFilter = THREE.LinearFilter;
+          texture.magFilter = THREE.LinearFilter;
+          material.map = texture;
+          material.vertexColors = false;
+          material.needsUpdate = true;
+        },
+        undefined,
+        () => {
+          // Fallback: generate texture dynamically if file not found
+          console.log(`Pre-generated texture not found, generating ${mapSource} zoom ${zoom} dynamically...`);
+          setIsLoading(true);
+          (async () => {
+            try {
+              const mapBounds = getMapBounds('AEGINA');
+              const mapTexture = await createMapTexture(mapSource, mapBounds, zoom);
+              material.map = mapTexture;
+              material.vertexColors = false;
+              material.needsUpdate = true;
+              setIsLoading(false);
+            } catch (error) {
+              console.error('Failed to load map texture:', error);
+              setIsLoading(false);
+            }
+          })();
         }
-      })();
+      );
     }
     
     terrain = new THREE.Mesh(geometry, material);
@@ -565,28 +580,6 @@ const AeginaElevation = () => {
     const loadingTimer = setTimeout(() => {
       setIsLoading(false);
     }, 100);
-    
-    // Pre-generate all map textures on first load (only once)
-    if (Object.keys(texturesCacheRef.current).length === 0) {
-      (async () => {
-        const mapSources = ['osm', 'satellite', 'watercolor'];
-        const zooms = [11, 12, 13];
-        const mapBounds = getMapBounds('AEGINA');
-        
-        for (const source of mapSources) {
-          for (const zoom of zooms) {
-            const cacheKey = `${source}_${zoom}`;
-            try {
-              const mapTexture = await createMapTexture(source, mapBounds, zoom);
-              texturesCacheRef.current[cacheKey] = mapTexture;
-            } catch (error) {
-              console.error(`Failed to pre-generate ${source} zoom ${zoom}:`, error);
-            }
-          }
-        }
-        console.log('All map textures pre-generated');
-      })();
-    }
 
     return () => {
       isRunning = false;
