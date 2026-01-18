@@ -14,6 +14,7 @@ import {
 
 const AeginaElevation = () => {
   const threeRef = useRef(null);
+  const cameraStateRef = useRef({ position: null, target: null });
   const [terrainDetail, setTerrainDetail] = useState('Low');
   const [appearance, setAppearance] = useState('Island');
   const [isLoading, setIsLoading] = useState(true);
@@ -194,17 +195,87 @@ const AeginaElevation = () => {
         return { lon, lat };
       };
       
-      // Apply transparency based on island polygon test
-      for (let y = 0; y < finalCanvas.height; y++) {
-        for (let x = 0; x < finalCanvas.width; x++) {
-          const { lon, lat } = canvasToGeo(x, y);
+      // Helper to find minimum distance from point to polygon
+      const distanceToPolygon = (lon, lat, ring) => {
+        let minDist = Infinity;
+        for (let i = 0; i < ring.length - 1; i++) {
+          const x1 = ring[i][0], y1 = ring[i][1];
+          const x2 = ring[i + 1][0], y2 = ring[i + 1][1];
+          // Distance from point to line segment
+          const dx = x2 - x1, dy = y2 - y1;
+          const t = Math.max(0, Math.min(1, ((lon - x1) * dx + (lat - y1) * dy) / (dx * dx + dy * dy)));
+          const nearX = x1 + t * dx, nearY = y1 + t * dy;
+          const dist = Math.hypot(lon - nearX, lat - nearY);
+          minDist = Math.min(minDist, dist);
+        }
+        return minDist;
+      };
+      
+      // Apply transparency with label buffer: compute on lower resolution then scale up for speed
+      const labelBufferDegrees = 0.006; // Twice as wide as before (~600m), enough for typical labels
+      
+      // Compute mask at lower resolution to speed up calculation
+      const maskResolution = Math.min(256, Math.ceil(finalCanvas.width / 4));
+      const maskAlphas = new Uint8Array(maskResolution * maskResolution);
+      
+      for (let my = 0; my < maskResolution; my++) {
+        for (let mx = 0; mx < maskResolution; mx++) {
+          // Map mask pixel to canvas pixel
+          const canvasX = (mx / maskResolution) * finalCanvas.width;
+          const canvasY = (my / maskResolution) * finalCanvas.height;
+          
+          const { lon, lat } = canvasToGeo(canvasX, canvasY);
           const inIsland = isPointInPolygon(lon, lat, aeginaRing) || isPointInPolygon(lon, lat, moniRing);
           
+          let alpha = 255;
           if (!inIsland) {
-            // Make this pixel fully transparent
-            const pixelIndex = (y * finalCanvas.width + x) * 4;
-            data[pixelIndex + 3] = 0; // Set alpha to 0
+            // Check distance to island boundary
+            const distAegina = distanceToPolygon(lon, lat, aeginaRing);
+            const distMoni = distanceToPolygon(lon, lat, moniRing);
+            const minDist = Math.min(distAegina, distMoni);
+            
+            // Fade from full opacity at the boundary to transparent at buffer distance
+            if (minDist < labelBufferDegrees) {
+              alpha = Math.round((1 - minDist / labelBufferDegrees) * 255);
+            } else {
+              alpha = 0;
+            }
           }
+          
+          maskAlphas[my * maskResolution + mx] = alpha;
+        }
+      }
+      
+      // Apply mask to final canvas using interpolated values from lower-res mask
+      for (let y = 0; y < finalCanvas.height; y++) {
+        for (let x = 0; x < finalCanvas.width; x++) {
+          // Map to mask coordinates with interpolation
+          const maskX = (x / finalCanvas.width) * maskResolution;
+          const maskY = (y / finalCanvas.height) * maskResolution;
+          
+          const mx0 = Math.floor(maskX);
+          const my0 = Math.floor(maskY);
+          const mx1 = Math.min(mx0 + 1, maskResolution - 1);
+          const my1 = Math.min(my0 + 1, maskResolution - 1);
+          
+          const fx = maskX - mx0;
+          const fy = maskY - my0;
+          
+          // Bilinear interpolation
+          const a00 = maskAlphas[my0 * maskResolution + mx0];
+          const a10 = maskAlphas[my0 * maskResolution + mx1];
+          const a01 = maskAlphas[my1 * maskResolution + mx0];
+          const a11 = maskAlphas[my1 * maskResolution + mx1];
+          
+          const alpha = Math.round(
+            a00 * (1 - fx) * (1 - fy) +
+            a10 * fx * (1 - fy) +
+            a01 * (1 - fx) * fy +
+            a11 * fx * fy
+          );
+          
+          const pixelIndex = (y * finalCanvas.width + x) * 4;
+          data[pixelIndex + 3] = alpha;
         }
       }
       
@@ -227,8 +298,17 @@ const AeginaElevation = () => {
     scene.background = new THREE.Color(0x87CEEB); // Light sky blue
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.set(0, 5, 10);
-    camera.lookAt(0, 0, 0);
+    
+    // Restore previous camera position if available
+    if (cameraStateRef.current.position) {
+      camera.position.copy(cameraStateRef.current.position);
+      if (cameraStateRef.current.target) {
+        camera.lookAt(cameraStateRef.current.target);
+      }
+    } else {
+      camera.position.set(0, 5, 10);
+      camera.lookAt(0, 0, 0);
+    }
 
     let renderer, geometry, material, terrain;
     
@@ -454,6 +534,13 @@ const AeginaElevation = () => {
       isRunning = false;
       clearTimeout(loadingTimer);
       window.removeEventListener('resize', handleResize);
+      
+      // Save camera state for next render
+      if (camera) {
+        cameraStateRef.current.position = camera.position.clone();
+        cameraStateRef.current.target = new THREE.Vector3(0, 0, 0); // Camera typically looks at origin
+      }
+      
       geometry.dispose();
       material.dispose();
       controls.dispose();
@@ -478,13 +565,13 @@ const AeginaElevation = () => {
       {isLoading && (
         <div style={{
           position: 'fixed',
-          top: '20px',
-          left: '20px',
-          width: '40px',
-          height: '40px',
+          top: '15px',
+          left: '15px',
+          width: '28px',
+          height: '28px',
           borderRadius: '50%',
-          border: '3px solid rgba(0, 0, 0, 0.1)',
-          borderTop: '3px solid #333',
+          border: '2px solid rgba(100, 100, 100, 0.2)',
+          borderTop: '2px solid rgba(100, 100, 100, 0.8)',
           animation: 'spin 0.8s linear infinite',
           zIndex: 1001
         }} />
