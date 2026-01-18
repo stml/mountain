@@ -44,7 +44,7 @@ const AeginaElevation = () => {
       const urls = {
         osm: `https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
         satellite: `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
-        watercolor: `https://tile.stamen.com/watercolor/${z}/${x}/${y}.jpg`
+        watercolor: `https://tiles.stadiamaps.com/tiles/stamen_watercolor/${z}/${x}/${y}.jpg`
       };
       
       try {
@@ -153,6 +153,62 @@ const AeginaElevation = () => {
         const scaledCtx = finalCanvas.getContext('2d');
         scaledCtx.drawImage(croppedCanvas, 0, 0, croppedCanvas.width, croppedCanvas.height, 0, 0, scaledWidth, scaledHeight);
       }
+      
+      // Apply island mask: make pixels outside island bounds transparent
+      const maskCtx = finalCanvas.getContext('2d');
+      const imageData = maskCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height);
+      const data = imageData.data;
+      
+      // Map canvas pixels back to geographic coordinates
+      const canvasToGeo = (canvasX, canvasY) => {
+        // Reverse the scaling that was applied
+        let scaledCanvasX = canvasX;
+        let scaledCanvasY = canvasY;
+        if (finalCanvas !== croppedCanvas) {
+          const scaleX = croppedCanvas.width / finalCanvas.width;
+          const scaleY = croppedCanvas.height / finalCanvas.height;
+          scaledCanvasX = canvasX * scaleX;
+          scaledCanvasY = canvasY * scaleY;
+        }
+        
+        // Add back the crop offset to get position in full tile grid
+        const fullCanvasX = scaledCanvasX + cropX;
+        const fullCanvasY = scaledCanvasY + cropY;
+        
+        // Convert to tile coordinates
+        const tileX = topLeft.x + Math.floor(fullCanvasX / 256);
+        const tileY = topLeft.y + Math.floor(fullCanvasY / 256);
+        const pixelInTileX = fullCanvasX % 256;
+        const pixelInTileY = fullCanvasY % 256;
+        
+        // Convert tile+pixel to continuous tile coordinates
+        const continuousTileX = tileX + pixelInTileX / 256;
+        const continuousTileY = tileY + pixelInTileY / 256;
+        
+        // Convert to geographic coordinates using Web Mercator
+        const n = Math.pow(2, zoom);
+        const lon = (continuousTileX / n) * 360 - 180;
+        const latRad = Math.atan(Math.sinh(Math.PI * (1 - 2 * continuousTileY / n)));
+        const lat = (latRad * 180) / Math.PI;
+        
+        return { lon, lat };
+      };
+      
+      // Apply transparency based on island polygon test
+      for (let y = 0; y < finalCanvas.height; y++) {
+        for (let x = 0; x < finalCanvas.width; x++) {
+          const { lon, lat } = canvasToGeo(x, y);
+          const inIsland = isPointInPolygon(lon, lat, aeginaRing) || isPointInPolygon(lon, lat, moniRing);
+          
+          if (!inIsland) {
+            // Make this pixel fully transparent
+            const pixelIndex = (y * finalCanvas.width + x) * 4;
+            data[pixelIndex + 3] = 0; // Set alpha to 0
+          }
+        }
+      }
+      
+      maskCtx.putImageData(imageData, 0, 0);
       
       const mapTexture = new THREE.CanvasTexture(finalCanvas);
       mapTexture.wrapS = THREE.ClampToEdgeWrapping;
