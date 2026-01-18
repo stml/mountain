@@ -78,49 +78,81 @@ const AeginaElevation = () => {
         return { x, y };
       };
       
+      // Get tile pixel coordinates (position within tile)
+      const getTilePixelCoords = (lon, lat, z) => {
+        const n = Math.pow(2, z);
+        const x = ((lon + 180) / 360) * n;
+        const latRad = (lat * Math.PI) / 180;
+        const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+        
+        const tileX = Math.floor(x);
+        const tileY = Math.floor(y);
+        const pixelX = Math.floor((x - tileX) * 256);
+        const pixelY = Math.floor((y - tileY) * 256);
+        
+        return { tileX, tileY, pixelX, pixelY };
+      };
+      
       const topLeft = getTileCoords(bounds.lon_min, bounds.lat_max, zoom);
       const bottomRight = getTileCoords(bounds.lon_max, bounds.lat_min, zoom);
+      const topLeftPixels = getTilePixelCoords(bounds.lon_min, bounds.lat_max, zoom);
+      const bottomRightPixels = getTilePixelCoords(bounds.lon_max, bounds.lat_min, zoom);
       
       // Calculate tile grid size
       const tileCountX = bottomRight.x - topLeft.x + 1;
       const tileCountY = bottomRight.y - topLeft.y + 1;
       
-      // Create canvas: base size is tile grid × 256px per tile
-      let canvasWidth = tileCountX * 256;
-      let canvasHeight = tileCountY * 256;
+      // Create full tile grid canvas
+      const fullCanvasWidth = tileCountX * 256;
+      const fullCanvasHeight = tileCountY * 256;
       
-      // Scale down if needed while maintaining aspect ratio
-      const maxSize = 1024;
-      if (Math.max(canvasWidth, canvasHeight) > maxSize) {
-        const scale = maxSize / Math.max(canvasWidth, canvasHeight);
-        canvasWidth = Math.round(canvasWidth * scale);
-        canvasHeight = Math.round(canvasHeight * scale);
-      }
-      
-      const canvas = document.createElement('canvas');
-      canvas.width = canvasWidth;
-      canvas.height = canvasHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#e0e0e0';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Size tiles proportionally across the canvas
-      const tileWidth = canvas.width / tileCountX;
-      const tileHeight = canvas.height / tileCountY;
+      const fullCanvas = document.createElement('canvas');
+      fullCanvas.width = fullCanvasWidth;
+      fullCanvas.height = fullCanvasHeight;
+      const fullCtx = fullCanvas.getContext('2d');
+      fullCtx.fillStyle = '#e0e0e0';
+      fullCtx.fillRect(0, 0, fullCanvas.width, fullCanvas.height);
       
       // Fetch and composite tiles
       for (let ty = topLeft.y; ty <= bottomRight.y; ty++) {
         for (let tx = topLeft.x; tx <= bottomRight.x; tx++) {
           const tile = await fetchTile(tx, ty, zoom, tileSource);
           if (tile) {
-            const canvasX = (tx - topLeft.x) * tileWidth;
-            const canvasY = (ty - topLeft.y) * tileHeight;
-            ctx.drawImage(tile, canvasX, canvasY, tileWidth, tileHeight);
+            const canvasX = (tx - topLeft.x) * 256;
+            const canvasY = (ty - topLeft.y) * 256;
+            fullCtx.drawImage(tile, canvasX, canvasY, 256, 256);
           }
         }
       }
       
-      const mapTexture = new THREE.CanvasTexture(canvas);
+      // Crop to the actual geographic extent
+      const cropX = topLeftPixels.pixelX;
+      const cropY = topLeftPixels.pixelY;
+      const cropWidth = bottomRightPixels.pixelX + 256 - cropX;
+      const cropHeight = bottomRightPixels.pixelY + 256 - cropY;
+      
+      const croppedCanvas = document.createElement('canvas');
+      croppedCanvas.width = cropWidth;
+      croppedCanvas.height = cropHeight;
+      const croppedCtx = croppedCanvas.getContext('2d');
+      croppedCtx.drawImage(fullCanvas, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+      
+      // Scale down if needed while maintaining aspect ratio
+      let finalCanvas = croppedCanvas;
+      const maxSize = 1024;
+      if (Math.max(croppedCanvas.width, croppedCanvas.height) > maxSize) {
+        const scale = maxSize / Math.max(croppedCanvas.width, croppedCanvas.height);
+        const scaledWidth = Math.round(croppedCanvas.width * scale);
+        const scaledHeight = Math.round(croppedCanvas.height * scale);
+        
+        finalCanvas = document.createElement('canvas');
+        finalCanvas.width = scaledWidth;
+        finalCanvas.height = scaledHeight;
+        const scaledCtx = finalCanvas.getContext('2d');
+        scaledCtx.drawImage(croppedCanvas, 0, 0, croppedCanvas.width, croppedCanvas.height, 0, 0, scaledWidth, scaledHeight);
+      }
+      
+      const mapTexture = new THREE.CanvasTexture(finalCanvas);
       mapTexture.wrapS = THREE.ClampToEdgeWrapping;
       mapTexture.wrapT = THREE.ClampToEdgeWrapping;
       mapTexture.minFilter = THREE.LinearFilter;
