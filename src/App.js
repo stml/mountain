@@ -78,17 +78,49 @@ const AeginaElevation = () => {
         return { x, y };
       };
       
+      // Also get pixel-precise coordinates for accurate geographic extent
+      const getPixelCoords = (lon, lat, z) => {
+        const n = Math.pow(2, z);
+        const tileX = ((lon + 180) / 360) * n;
+        const tileY = (1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2 * n;
+        const tile_x = Math.floor(tileX);
+        const tile_y = Math.floor(tileY);
+        const pixel_x = (tileX - tile_x) * 256;
+        const pixel_y = (tileY - tile_y) * 256;
+        return { tile_x, tile_y, pixel_x, pixel_y };
+      };
+      
       const topLeft = getTileCoords(bounds.lon_min, bounds.lat_max, zoom);
       const bottomRight = getTileCoords(bounds.lon_max, bounds.lat_min, zoom);
+      
+      // Get precise pixel coordinates for the actual bounds
+      const topLeftPixel = getPixelCoords(bounds.lon_min, bounds.lat_max, zoom);
+      const bottomRightPixel = getPixelCoords(bounds.lon_max, bounds.lat_min, zoom);
       
       // Calculate tile grid
       const tileCountX = bottomRight.x - topLeft.x + 1;
       const tileCountY = bottomRight.y - topLeft.y + 1;
       
-      // Create canvas matching tile grid exactly - each tile is 256px
-      // This ensures 1:1 pixel-to-tile mapping which maintains geographic accuracy
-      let canvasWidth = tileCountX * 256;
-      let canvasHeight = tileCountY * 256;
+      // Calculate the ACTUAL extent in pixels based on geographic bounds
+      // This accounts for bounds that don't align exactly to tile boundaries
+      const pixelsWidth = (bottomRightPixel.tile_x - topLeftPixel.tile_x) * 256 + 
+                         (bottomRightPixel.pixel_x - topLeftPixel.pixel_x);
+      const pixelsHeight = (bottomRightPixel.tile_y - topLeftPixel.tile_y) * 256 + 
+                          (bottomRightPixel.pixel_y - topLeftPixel.pixel_y);
+      
+      // DEBUG: Log what we're calculating
+      console.log('=== MAP TEXTURE CREATION DEBUG ===');
+      console.log('Bounds:', bounds);
+      console.log('Zoom level:', zoom);
+      console.log('Tile grid:', tileCountX, '×', tileCountY);
+      console.log('Actual geographic extent (px):', pixelsWidth.toFixed(1), '×', pixelsHeight.toFixed(1));
+      
+      // Create canvas sized to the actual geographic extent, not just the tile grid
+      // This ensures the canvas represents exactly what the bounds specify
+      let canvasWidth = Math.round(pixelsWidth);
+      let canvasHeight = Math.round(pixelsHeight);
+      
+      console.log('Canvas before scaling:', canvasWidth, '×', canvasHeight, 'aspect:', (canvasWidth / canvasHeight).toFixed(4));
       
       // Limit canvas size but preserve aspect ratio for accurate map projection
       const maxSize = 1024;
@@ -96,6 +128,7 @@ const AeginaElevation = () => {
         const scale = maxSize / Math.max(canvasWidth, canvasHeight);
         canvasWidth = Math.round(canvasWidth * scale);
         canvasHeight = Math.round(canvasHeight * scale);
+        console.log('Scaled canvas (maxSize=' + maxSize + '):', canvasWidth, '×', canvasHeight, 'aspect:', (canvasWidth / canvasHeight).toFixed(4));
       }
       
       const canvas = document.createElement('canvas');
@@ -105,20 +138,34 @@ const AeginaElevation = () => {
       ctx.fillStyle = '#e0e0e0';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
-      // Calculate tile size preserving square tiles in both X and Y
-      const tileSizeX = canvas.width / tileCountX;
-      const tileSizeY = canvas.height / tileCountY;
-      // Use minimum to prevent tiles from distorting - should be equal anyway
-      const tileSize = Math.min(tileSizeX, tileSizeY);
+      // Calculate the scaling factor (if canvas was scaled down from full pixel size)
+      const scaleX = canvasWidth / pixelsWidth;
+      const scaleY = canvasHeight / pixelsHeight;
       
-      // Fetch and composite tiles
+      // Draw tiles with proper offset for partial tile coverage
+      // The top-left corner might be in the middle of a tile (pixel offsets)
       for (let ty = topLeft.y; ty <= bottomRight.y; ty++) {
         for (let tx = topLeft.x; tx <= bottomRight.x; tx++) {
           const tile = await fetchTile(tx, ty, zoom, tileSource);
           if (tile) {
-            const canvasX = (tx - topLeft.x) * tileSize;
-            const canvasY = (ty - topLeft.y) * tileSize;
-            ctx.drawImage(tile, canvasX, canvasY, tileSize, tileSize);
+            // Calculate which part of the tile to draw
+            let srcX = 0, srcY = 0, srcW = 256, srcH = 256;
+            
+            // For top-left tile, skip the left/top pixels
+            if (tx === topLeft.x) srcX = topLeftPixel.pixel_x;
+            if (ty === topLeft.y) srcY = topLeftPixel.pixel_y;
+            
+            // For bottom-right tile, limit the right/bottom pixels
+            if (tx === bottomRight.x) srcW = 256 - (256 - bottomRightPixel.pixel_x);
+            if (ty === bottomRight.y) srcH = 256 - (256 - bottomRightPixel.pixel_y);
+            
+            // Calculate canvas position
+            const canvasX = ((tx - topLeft.x) * 256 - topLeftPixel.pixel_x) * scaleX;
+            const canvasY = ((ty - topLeft.y) * 256 - topLeftPixel.pixel_y) * scaleY;
+            const drawW = srcW * scaleX;
+            const drawH = srcH * scaleY;
+            
+            ctx.drawImage(tile, srcX, srcY, srcW, srcH, canvasX, canvasY, drawW, drawH);
           }
         }
       }
