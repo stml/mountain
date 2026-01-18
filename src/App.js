@@ -1,18 +1,38 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import aeginaData from './aegina.json';
 import moniData from './moni.json';
-import elevationData from './aegina_elevation_lo.json';
+import elevationDataLo from './aegina_elevation_lo.json';
+import elevationDataMed from './aegina_elevation_med.json';
+import elevationDataHi from './aegina_elevation_hi.json';
 
 // === CONFIGURATION ===
-const ELEVATION_SCALE = 800; // Higher = flatter terrain, lower = more exaggerated
+const INITIAL_ELEVATION_SCALE = 800; // Base elevation scale
 
 const AeginaElevation = () => {
   const threeRef = useRef(null);
+  const [terrainDetail, setTerrainDetail] = useState('Low');
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!threeRef.current) return;
+
+    setIsLoading(true);
+
+    // Select elevation data based on terrain detail
+    let elevationData;
+    let detailLevel;
+    if (terrainDetail === 'Low') {
+      elevationData = elevationDataLo;
+      detailLevel = 'Low';
+    } else if (terrainDetail === 'Medium') {
+      elevationData = elevationDataMed;
+      detailLevel = 'Medium';
+    } else {
+      elevationData = elevationDataHi;
+      detailLevel = 'High';
+    }
 
     const container = threeRef.current;
     const width = container.clientWidth;
@@ -112,7 +132,7 @@ const AeginaElevation = () => {
           maxElev = Math.max(maxElev, elevation);
         }
         
-        const z = elevation / ELEVATION_SCALE;
+        const z = elevation / INITIAL_ELEVATION_SCALE;
         positions.setZ(i, z);
       }
       
@@ -203,27 +223,100 @@ const AeginaElevation = () => {
     };
     animate();
 
+    // Mark loading complete after a small delay to ensure rendering
+    const loadingTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, 100);
+
     return () => {
       isRunning = false;
+      clearTimeout(loadingTimer);
       window.removeEventListener('resize', handleResize);
       geometry.dispose();
       material.dispose();
       controls.dispose();
     };
-  }, []);
+  }, [terrainDetail]);
 
   return (
-    <div 
-      ref={threeRef} 
-      style={{ 
-        width: '100vw', 
-        height: '100vh',
-        backgroundColor: '#87CEEB', // Light sky blue
-        margin: 0,
-        padding: 0,
-        overflow: 'hidden'
-      }}
-    />
+    <>
+      <div 
+        ref={threeRef} 
+        style={{ 
+          width: '100vw', 
+          height: '100vh',
+          backgroundColor: '#87CEEB',
+          margin: 0,
+          padding: 0,
+          overflow: 'hidden'
+        }}
+      />
+      
+      {/* Loading Spinner */}
+      {isLoading && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          left: '20px',
+          width: '40px',
+          height: '40px',
+          borderRadius: '50%',
+          border: '3px solid rgba(0, 0, 0, 0.1)',
+          borderTop: '3px solid #333',
+          animation: 'spin 0.8s linear infinite',
+          zIndex: 1001
+        }} />
+      )}
+      
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
+      
+      {/* Control Panel */}
+      <div style={{
+        position: 'fixed',
+        top: '20px',
+        right: '20px',
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        padding: '20px',
+        borderRadius: '8px',
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+        fontFamily: 'Arial, sans-serif',
+        zIndex: 1000,
+        minWidth: '250px'
+      }}>
+        <div>
+          <label style={{
+            display: 'block',
+            marginBottom: '8px',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            color: '#333'
+          }}>
+            Terrain Detail
+          </label>
+          <select
+            value={terrainDetail}
+            onChange={(e) => setTerrainDetail(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '8px',
+              borderRadius: '4px',
+              border: '1px solid #ddd',
+              fontSize: '14px',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="Low">Low</option>
+            <option value="Medium">Medium</option>
+            <option value="High">High</option>
+          </select>
+        </div>
+      </div>
+    </>
   );
 };
 
