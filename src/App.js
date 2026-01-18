@@ -489,6 +489,27 @@ const AeginaElevation = () => {
     terrain.rotation.x = -Math.PI / 2;
     scene.add(terrain);
     
+    // Add infinite water plane
+    const waterGeometry = new THREE.PlaneGeometry(1000, 1000);
+    const waterMaterial = new THREE.MeshStandardMaterial({
+      color: 0x1a5f7a,
+      roughness: 0.3,
+      metalness: 0.1
+    });
+    const water = new THREE.Mesh(waterGeometry, waterMaterial);
+    water.rotation.x = -Math.PI / 2;
+    water.position.z = -0.01; // Slightly below terrain to avoid z-fighting
+    scene.add(water);
+    
+    // Add sky dome for horizon effect
+    const skyGeometry = new THREE.SphereGeometry(500, 32, 32);
+    const skyMaterial = new THREE.MeshBasicMaterial({
+      color: 0x87CEEB,
+      side: THREE.BackSide
+    });
+    const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+    scene.add(sky);
+    
     const light = new THREE.DirectionalLight(0xffffff, 1);
     light.position.set(5, 10, 5);
     scene.add(light);
@@ -503,6 +524,12 @@ const AeginaElevation = () => {
     controls.enableZoom = true;
     controls.autoRotate = false;
     controls.autoRotateSpeed = 0;
+    
+    // Constrain camera to not go below water level
+    // minPolarAngle = π/2 allows viewing at horizon and up
+    // maxPolarAngle = π allows tilting down to water surface
+    controls.minPolarAngle = Math.PI / 2;
+    controls.maxPolarAngle = Math.PI;
 
     // Handle window resize
     const handleResize = () => {
