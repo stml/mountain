@@ -526,10 +526,8 @@ const AeginaElevation = () => {
     controls.autoRotateSpeed = 0;
     
     // Constrain camera to not go below water level
-    // minPolarAngle = π/2 allows viewing at horizon and up
-    // maxPolarAngle = π allows tilting down to water surface
-    controls.minPolarAngle = Math.PI / 2;
-    controls.maxPolarAngle = Math.PI;
+    // maxPolarAngle = π/2 prevents tilting below the horizon (water surface)
+    controls.maxPolarAngle = Math.PI / 2;
 
     // Handle window resize
     const handleResize = () => {
