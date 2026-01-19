@@ -13,8 +13,7 @@ const bounds = {
 
 const urls = {
   osm: (x, y, z) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
-  satellite: (x, y, z) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
-  watercolor: (x, y, z) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`
+  satellite: (x, y, z) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`
 };
 
 const fetchTile = async (url) => {
@@ -48,7 +47,8 @@ const generateTexture = async (tileSource, zoom) => {
     const tileY = Math.floor(y);
     const pixelX = Math.floor((x - tileX) * 256);
     const pixelY = Math.floor((y - tileY) * 256);
-    return { tileX, tileY, pixelX, pixelY };
+    // Return the fractional pixel positions for more accurate calculations
+    return { tileX, tileY, pixelX, pixelY, fracPixelX: (x - tileX) * 256, fracPixelY: (y - tileY) * 256 };
   };
   
   const topLeft = getTileCoords(bounds.lon_min, bounds.lat_max, zoom);
@@ -131,10 +131,10 @@ const generateTexture = async (tileSource, zoom) => {
     }
     
     // Continue with crop and save
-    const cropX = topLeftPixels.pixelX;
-    const cropY = topLeftPixels.pixelY;
-    const cropWidth = (bottomRight.x - topLeft.x) * 256 + bottomRightPixels.pixelX - topLeftPixels.pixelX + 1;
-    const cropHeight = (bottomRight.y - topLeft.y) * 256 + bottomRightPixels.pixelY - topLeftPixels.pixelY + 1;
+    const cropX = Math.round(topLeftPixels.fracPixelX);
+    const cropY = Math.round(topLeftPixels.fracPixelY);
+    const cropWidth = Math.round((bottomRight.x - topLeft.x) * 256 + bottomRightPixels.fracPixelX - topLeftPixels.fracPixelX);
+    const cropHeight = Math.round((bottomRight.y - topLeft.y) * 256 + bottomRightPixels.fracPixelY - topLeftPixels.fracPixelY);
     
     console.log(`  Cropping to ${cropWidth}x${cropHeight}...`);
     let croppedImage = await sharp(canvas, {
@@ -201,12 +201,14 @@ const generateTexture = async (tileSource, zoom) => {
   }
   
   // Crop to geographic extent
-  const cropX = topLeftPixels.pixelX;
-  const cropY = topLeftPixels.pixelY;
-  const cropWidth = (bottomRight.x - topLeft.x) * 256 + bottomRightPixels.pixelX - topLeftPixels.pixelX + 1;
-  const cropHeight = (bottomRight.y - topLeft.y) * 256 + bottomRightPixels.pixelY - topLeftPixels.pixelY + 1;
+  const cropX = Math.round(topLeftPixels.fracPixelX);
+  const cropY = Math.round(topLeftPixels.fracPixelY);
+  const cropWidth = Math.round((bottomRight.x - topLeft.x) * 256 + bottomRightPixels.fracPixelX - topLeftPixels.fracPixelX);
+  const cropHeight = Math.round((bottomRight.y - topLeft.y) * 256 + bottomRightPixels.fracPixelY - topLeftPixels.fracPixelY);
   
-  console.log(`  Cropping to ${cropWidth}x${cropHeight}...`);
+  console.log(`  Top-left tile: (${topLeft.x},${topLeft.y}) pixel: (${topLeftPixels.pixelX},${topLeftPixels.pixelY}) frac: (${topLeftPixels.fracPixelX.toFixed(2)},${topLeftPixels.fracPixelY.toFixed(2)})`);
+  console.log(`  Bottom-right tile: (${bottomRight.x},${bottomRight.y}) pixel: (${bottomRightPixels.pixelX},${bottomRightPixels.pixelY}) frac: (${bottomRightPixels.fracPixelX.toFixed(2)},${bottomRightPixels.fracPixelY.toFixed(2)})`);
+  console.log(`  Cropping from (${cropX},${cropY}) size ${cropWidth}x${cropHeight}...`);
   let croppedImage = await image.extract({
     left: cropX,
     top: cropY,
@@ -247,8 +249,8 @@ const generateTexture = async (tileSource, zoom) => {
 const main = async () => {
   console.log('Starting offline map texture generation...\n');
   
-  const sources = ['osm', 'satellite', 'watercolor'];
-  const zooms = [11, 12, 13];
+  const sources = ['osm', 'satellite'];
+  const zooms = [11, 12, 13, 14, 15];
   
   for (const source of sources) {
     for (const zoom of zooms) {

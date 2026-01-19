@@ -27,16 +27,14 @@ const AeginaElevation = () => {
 
     // Select elevation data based on terrain detail
     let elevationData;
-    let detailLevel;
     if (terrainDetail === 'Low') {
       elevationData = elevationDataLo;
-      detailLevel = 'Low';
     } else if (terrainDetail === 'Medium') {
       elevationData = elevationDataMed;
-      detailLevel = 'Medium';
-    } else {
+    } else if (terrainDetail === 'High') {
       elevationData = elevationDataHi;
-      detailLevel = 'High';
+    } else { // 'Very High'
+      elevationData = elevationDataHi;
     }
 
     // === HELPER FUNCTIONS FOR MAP TILES ===
@@ -295,6 +293,24 @@ const AeginaElevation = () => {
     const width = container.clientWidth;
     const height = container.clientHeight;
 
+    // Calculate map tile zoom level based on camera distance from terrain
+    const getMapZoomFromCameraDistance = () => {
+      if (!camera) return 12;
+      // Distance from camera to terrain center (origin)
+      const distance = camera.position.length();
+      // Map distance to zoom level: closer = higher zoom
+      // At distance ~15 or more: zoom 11 (wide view)
+      // At distance ~10: zoom 12
+      // At distance ~5: zoom 13
+      // At distance ~2.5: zoom 14
+      // At distance < 2: zoom 15 (street level)
+      if (distance > 15) return 11;
+      if (distance > 10) return 12;
+      if (distance > 5) return 13;
+      if (distance > 2.5) return 14;
+      return 15;
+    };
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87CEEB); // Light sky blue
 
@@ -467,48 +483,50 @@ const AeginaElevation = () => {
     });
     
     // Add map texture if not Island appearance - load from pre-generated files
+    let updateMapTexture = null;
+    
     if (appearance !== 'Island') {
-      const mapSource = appearance.toLowerCase() === 'roads' ? 'osm' : 
-                       appearance.toLowerCase() === 'satellite' ? 'satellite' : 'watercolor';
-      const zoom = getZoomForTerrainDetail(terrainDetail);
-      const cacheKey = `${mapSource}_${zoom}`;
+      const mapSource = appearance.toLowerCase() === 'roads' ? 'osm' : 'satellite';
       
-      // Try to load pre-generated texture from public folder
-      const texturePath = `/map-textures/${mapSource}_z${zoom}.png`;
+      // Use dynamic zoom based on camera distance
+      updateMapTexture = () => {
+        const zoom = getMapZoomFromCameraDistance();
+        const texturePath = `/map-textures/${mapSource}_z${zoom}.png`;
+        
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.load(
+          texturePath,
+          (texture) => {
+            // Pre-generated texture loaded successfully
+            texture.wrapS = THREE.ClampToEdgeWrapping;
+            texture.wrapT = THREE.ClampToEdgeWrapping;
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+            material.map = texture;
+            material.vertexColors = false;
+            material.needsUpdate = true;
+          },
+          undefined,
+          () => {
+            // Fallback: generate texture dynamically if file not found
+            console.log(`Pre-generated texture not found for ${mapSource} zoom ${getMapZoomFromCameraDistance()}, generating dynamically...`);
+            (async () => {
+              try {
+                const mapBounds = getMapBounds('AEGINA');
+                const mapTexture = await createMapTexture(mapSource, mapBounds, getMapZoomFromCameraDistance());
+                material.map = mapTexture;
+                material.vertexColors = false;
+                material.needsUpdate = true;
+              } catch (error) {
+                console.error('Failed to load map texture:', error);
+              }
+            })();
+          }
+        );
+      };
       
-      const textureLoader = new THREE.TextureLoader();
-      textureLoader.load(
-        texturePath,
-        (texture) => {
-          // Pre-generated texture loaded successfully
-          texture.wrapS = THREE.ClampToEdgeWrapping;
-          texture.wrapT = THREE.ClampToEdgeWrapping;
-          texture.minFilter = THREE.LinearFilter;
-          texture.magFilter = THREE.LinearFilter;
-          material.map = texture;
-          material.vertexColors = false;
-          material.needsUpdate = true;
-        },
-        undefined,
-        () => {
-          // Fallback: generate texture dynamically if file not found
-          console.log(`Pre-generated texture not found, generating ${mapSource} zoom ${zoom} dynamically...`);
-          setIsLoading(true);
-          (async () => {
-            try {
-              const mapBounds = getMapBounds('AEGINA');
-              const mapTexture = await createMapTexture(mapSource, mapBounds, zoom);
-              material.map = mapTexture;
-              material.vertexColors = false;
-              material.needsUpdate = true;
-              setIsLoading(false);
-            } catch (error) {
-              console.error('Failed to load map texture:', error);
-              setIsLoading(false);
-            }
-          })();
-        }
-      );
+      // Load initial texture
+      updateMapTexture();
     }
     
     terrain = new THREE.Mesh(geometry, material);
@@ -567,11 +585,26 @@ const AeginaElevation = () => {
 
     // Animation
     let isRunning = true;
+    let lastMapZoom = getMapZoomFromCameraDistance();
+    
     const animate = () => {
       if (!isRunning) return;
       requestAnimationFrame(animate);
       // Removed auto-rotation - now controlled by OrbitControls
       controls.update();
+      
+      // Update map zoom if camera distance changed significantly
+      if (appearance !== 'Island') {
+        const currentZoom = getMapZoomFromCameraDistance();
+        if (currentZoom !== lastMapZoom) {
+          lastMapZoom = currentZoom;
+          // Trigger map texture update (if updateMapTexture is defined)
+          if (typeof updateMapTexture === 'function') {
+            updateMapTexture();
+          }
+        }
+      }
+      
       renderer.render(scene, camera);
     };
     animate();
@@ -673,7 +706,6 @@ const AeginaElevation = () => {
             <option value="Island">Island</option>
             <option value="Roads">Roads</option>
             <option value="Satellite">Satellite</option>
-            <option value="Watercolour">Watercolour</option>
           </select>
         </div>
         
@@ -702,6 +734,7 @@ const AeginaElevation = () => {
             <option value="Low">Low</option>
             <option value="Medium">Medium</option>
             <option value="High">High</option>
+            <option value="Very High">Very High</option>
           </select>
         </div>
       </div>

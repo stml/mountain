@@ -72,12 +72,13 @@ export const ELEVATION = {
 export const ZOOM_LEVELS = {
   LOW: 12,      // Low terrain detail - wider view
   MEDIUM: 13,   // Medium terrain detail
-  HIGH: 14      // High terrain detail - maximum zoom for most detail
+  HIGH: 14,     // High terrain detail - street level
+  VERY_HIGH: 15 // Very high terrain detail - maximum zoom for most detail
 };
 
 /**
  * Get the appropriate zoom level for map tiles based on terrain detail
- * @param {string} terrainDetail - 'Low', 'Medium', or 'High'
+ * @param {string} terrainDetail - 'Low', 'Medium', 'High', or 'Very High'
  * @returns {number} - Zoom level for map tiles
  */
 export function getZoomForTerrainDetail(terrainDetail) {
@@ -88,6 +89,8 @@ export function getZoomForTerrainDetail(terrainDetail) {
       return ZOOM_LEVELS.MEDIUM;
     case 'High':
       return ZOOM_LEVELS.HIGH;
+    case 'Very High':
+      return ZOOM_LEVELS.VERY_HIGH;
     default:
       return ZOOM_LEVELS.HIGH;
   }
